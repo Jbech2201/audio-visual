@@ -1,0 +1,1944 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Vibe — Spotify &amp; Lirik</title>
+    <meta name="description" content="Visualisasi audio dan lirik karaoke yang sinkron dengan lagu Spotify yang sedang diputar. Enam mode: Api, Salju, Sakura, Senja, Siang Cerah, dan Malam Kota.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&family=Cinzel:wght@600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Montserrat', 'Segoe UI', sans-serif;
+            color: #fff;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* ---------- Background canvas & overlays ---------- */
+        #vibeCanvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .frost-overlay,
+        .fire-overlay {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0;
+            transition: opacity 1s ease;
+        }
+
+        .frost-overlay { box-shadow: inset 0 0 100px rgba(0, 200, 255, 0.45); }
+        .fire-overlay { box-shadow: inset 0 0 120px rgba(255, 30, 0, 0.55); }
+
+        body.mode-ice .frost-overlay { opacity: 1; }
+        body.mode-fire .fire-overlay { opacity: 1; }
+
+        /* ---------- Layout ---------- */
+        .ui-container {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 24px 24px 18px;
+            background: radial-gradient(circle at 50% 45%, transparent 32%, rgba(0, 0, 0, 0.82) 100%);
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* ---------- Top controls ---------- */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 8px;
+            border-radius: 60px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .btn {
+            width: 46px;
+            height: 46px;
+            padding: 0;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            border: none;
+            border-radius: 30px;
+            font-family: inherit;
+            font-weight: 700;
+            font-size: 24px;
+            letter-spacing: 0;
+            text-transform: uppercase;
+            color: #fff;
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.35s ease;
+            white-space: nowrap;
+        }
+
+        .btn:hover { background: rgba(255, 255, 255, 0.12); }
+        .btn:focus-visible { outline: 2px solid #fff; outline-offset: 4px; }
+
+        .btn-fire.active {
+            background: linear-gradient(45deg, #ff0000, #ff7b00);
+            box-shadow: 0 0 20px #ff3300, 0 0 40px rgba(255, 123, 0, 0.7);
+            transform: scale(1.04);
+        }
+
+        .btn-ice.active {
+            background: linear-gradient(45deg, #0088ff, #00ffff);
+            box-shadow: 0 0 20px #0088ff, 0 0 40px rgba(0, 255, 255, 0.7);
+            color: #002244;
+            transform: scale(1.04);
+        }
+
+        .spotify-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.68);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            white-space: nowrap;
+            transition: color 0.3s ease, border-color 0.3s ease;
+        }
+
+        .spotify-chip .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #777;
+            box-shadow: 0 0 0 rgba(30, 215, 96, 0);
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .spotify-chip.is-on {
+            color: rgba(255, 255, 255, 0.9);
+            border-color: rgba(30, 215, 96, 0.4);
+        }
+
+        .spotify-chip.is-on .dot {
+            background: #1ed760;
+            box-shadow: 0 0 10px #1ed760;
+        }
+
+        .spotify-chip.is-off .dot {
+            background: #ff5a3c;
+            box-shadow: 0 0 10px rgba(255, 90, 60, 0.8);
+        }
+
+        /* ---------- Lyrics ---------- */
+        .lyrics-wrapper {
+            flex: 1;
+            width: 100%;
+            max-width: 1000px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            perspective: 600px;
+        }
+
+        .lyric-meta {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
+            min-height: 32px;
+        }
+
+        .lyric-meta.is-empty { display: none; }
+
+        .lyric-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .tabs-empty {
+            font-size: 9px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .tab-btn {
+            padding: 7px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.65);
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+        }
+
+        body.mode-fire .tab-btn.active {
+            background: linear-gradient(45deg, #ff3b00, #ff9500);
+            border-color: transparent;
+            box-shadow: 0 0 16px rgba(255, 80, 0, 0.5);
+            color: #fff;
+        }
+
+        body.mode-ice .tab-btn.active {
+            background: linear-gradient(45deg, #0088ff, #00e5ff);
+            border-color: transparent;
+            box-shadow: 0 0 16px rgba(0, 180, 255, 0.5);
+            color: #002244;
+        }
+
+        .meta-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .mini-btn {
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.65);
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .mini-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+        }
+
+        .mini-btn.is-busy {
+            animation: spin 0.9s linear infinite;
+            opacity: 0.6;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .offset {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 3px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .offset button {
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        .offset button:hover { background: rgba(255, 255, 255, 0.22); }
+
+        .offset span {
+            min-width: 44px;
+            text-align: center;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .lyric-focus {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            min-height: 230px;
+            text-align: center;
+        }
+
+        .lyric-line {
+            max-width: 92vw;
+            line-height: 1.35;
+            font-size: 1.1rem;
+            letter-spacing: 0.5px;
+            opacity: 0.26;
+            transform: scale(0.86);
+            filter: blur(2px);
+            transition: opacity 0.5s cubic-bezier(0.25, 1, 0.5, 1),
+                        transform 0.5s cubic-bezier(0.25, 1, 0.5, 1),
+                        filter 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        .lyric-line.active {
+            opacity: 1;
+            transform: scale(1.06);
+            filter: none;
+        }
+
+        .lyric-line:empty { visibility: hidden; }
+
+        body.mode-fire .lyric-line {
+            color: #ffae00;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        body.mode-fire .lyric-line.active {
+            font-size: clamp(1.55rem, 4.6vw, 2.7rem);
+            color: #fff;
+            text-shadow:
+                0 0 6px rgba(255, 220, 150, 0.9),
+                0 0 18px rgba(255, 90, 0, 0.75),
+                0 0 42px rgba(255, 0, 0, 0.45);
+            animation: fireShake 2.4s ease-in-out infinite;
+        }
+
+        body.mode-ice .lyric-line {
+            color: #aaddff;
+            font-family: 'Cinzel', Georgia, serif;
+        }
+
+        body.mode-ice .lyric-line.active {
+            font-size: clamp(1.35rem, 4vw, 2.35rem);
+            color: #ffffff;
+            text-shadow:
+                0 0 8px rgba(180, 255, 255, 0.9),
+                0 0 22px rgba(0, 170, 255, 0.7),
+                0 0 48px rgba(0, 68, 255, 0.45);
+            letter-spacing: 2px;
+        }
+
+        body.is-paused .lyric-line.active { animation-play-state: paused; }
+
+        .lyric-line.is-switching {
+            opacity: 0 !important;
+            filter: blur(10px) !important;
+            transform: scale(0.9) !important;
+        }
+
+        @keyframes fireShake {
+            0%, 100% { transform: scale(1.06) translateY(0); }
+            50% { transform: scale(1.065) translateY(-0.5px); }
+        }
+
+        /* ---------- Bottom player ---------- */
+        .bottom {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 9px;
+        }
+
+        .player {
+            width: min(860px, 100%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 50px;
+            background: rgba(10, 8, 12, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            backdrop-filter: blur(18px) saturate(120%);
+            -webkit-backdrop-filter: blur(18px) saturate(120%);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+        }
+
+        .icon-btn {
+            flex: 0 0 auto;
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .icon-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.26); transform: scale(1.05); }
+        .icon-btn:active:not(:disabled) { transform: scale(0.96); }
+        .icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+        body.mode-fire #playPause:not(:disabled) {
+            background: linear-gradient(45deg, #ff3b00, #ff9500);
+            box-shadow: 0 0 16px rgba(255, 80, 0, 0.55);
+        }
+
+        body.mode-ice #playPause:not(:disabled) {
+            background: linear-gradient(45deg, #0088ff, #00e5ff);
+            box-shadow: 0 0 16px rgba(0, 180, 255, 0.5);
+            color: #002244;
+        }
+
+        .cover {
+            flex: 0 0 auto;
+            width: 38px;
+            height: 38px;
+            border-radius: 9px;
+            object-fit: cover;
+            background: rgba(255, 255, 255, 0.08);
+            display: none;
+        }
+
+        .cover.is-visible { display: block; }
+
+        .track {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .track-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            color: rgba(255, 255, 255, 0.92);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .track-artist {
+            font-size: 9px;
+            letter-spacing: 0.4px;
+            color: rgba(255, 255, 255, 0.5);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .track-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 9px;
+            font-variant-numeric: tabular-nums;
+            color: rgba(255, 255, 255, 0.55);
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.22);
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 11px;
+            height: 11px;
+            border: none;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+        }
+
+        body.mode-fire input[type="range"]::-webkit-slider-thumb { background: #ff7b00; box-shadow: 0 0 10px #ff3300; }
+        body.mode-fire input[type="range"]::-moz-range-thumb { background: #ff7b00; box-shadow: 0 0 10px #ff3300; }
+        body.mode-ice input[type="range"]::-webkit-slider-thumb { background: #00e5ff; box-shadow: 0 0 10px #00aaff; }
+        body.mode-ice input[type="range"]::-moz-range-thumb { background: #00e5ff; box-shadow: 0 0 10px #00aaff; }
+
+        .progress { flex: 1 1 auto; width: 100%; min-width: 0; }
+        .progress:disabled { opacity: 0.45; cursor: default; }
+
+        .status {
+            font-size: 10px;
+            letter-spacing: 1.6px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.55);
+            text-align: center;
+            max-width: 92vw;
+            padding: 3px 12px;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.35);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ---------- Seasonal themes ---------- */
+        body.mode-sakura {
+            --accent: #ff9cc5;
+            --accent-end: #e8579d;
+            --accent-ink: #48172f;
+            --accent-glow: rgba(255, 133, 184, 0.55);
+        }
+        body.mode-sunset {
+            --accent: #ffb45c;
+            --accent-end: #ef713f;
+            --accent-ink: #442013;
+            --accent-glow: rgba(255, 144, 58, 0.55);
+        }
+        body.mode-day {
+            --accent: #ffe879;
+            --accent-end: #ffc837;
+            --accent-ink: #31435a;
+            --accent-glow: rgba(255, 218, 80, 0.55);
+        }
+        body.mode-night {
+            --accent: #d8e5ff;
+            --accent-end: #849ada;
+            --accent-ink: #172341;
+            --accent-glow: rgba(174, 199, 255, 0.45);
+        }
+        body:is(.mode-fire, .mode-night) .ui-container {
+            background: radial-gradient(ellipse at center, transparent 30%, rgba(0, 0, 0, 0.45));
+        }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) .btn.active,
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) .tab-btn.active,
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) #playPause:not(:disabled) {
+            background: linear-gradient(45deg, var(--accent-end), var(--accent));
+            color: var(--accent-ink);
+            border-color: transparent;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) .btn.active { transform: scale(1.04); }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) .lyric-line {
+            color: var(--accent);
+            font-family: 'Cinzel', Georgia, serif;
+        }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) .lyric-line.active {
+            font-size: clamp(1.35rem, 4vw, 2.35rem);
+            color: #fff9f3;
+            text-shadow: 0 2px 8px rgba(30, 20, 40, 0.8), 0 0 24px var(--accent-glow);
+        }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) input[type="range"]::-webkit-slider-thumb {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent-glow);
+        }
+        body:is(.mode-sakura, .mode-sunset, .mode-day, .mode-night) input[type="range"]::-moz-range-thumb {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent-glow);
+        }
+        body.mode-sakura .ui-container {
+            background: radial-gradient(ellipse at center, rgba(46, 13, 40, 0.12), rgba(46, 13, 40, 0.55));
+        }
+        body.mode-sunset .ui-container {
+            background: radial-gradient(ellipse at center, transparent 30%, rgba(58, 23, 27, 0.45));
+        }
+        body.mode-day .ui-container {
+            background: radial-gradient(ellipse at center, transparent 30%, rgba(16, 67, 110, 0.18));
+        }
+        body.mode-day .controls { background: rgba(17, 62, 104, 0.6); }
+        body.mode-day .lyric-line { color: #fff; opacity: 0.65; }
+        body.mode-day .lyric-line.active { opacity: 1; text-shadow: 0 2px 6px #205880, 0 0 20px rgba(20, 64, 100, 0.6); }
+        body.mode-day .tab-btn,
+        body.mode-day .mini-btn,
+        body.mode-day .offset { background: rgba(17, 62, 104, 0.65); color: #fff; }
+        body.mode-day .player { background: rgba(17, 62, 104, 0.8); }
+        .controls { max-width: 100%; border-radius: 28px; }
+
+        /* ---------- Mobile / short screens ---------- */
+        @media (max-width: 640px) {
+            .ui-container { padding: 14px 10px 12px; gap: 8px; }
+            .controls { gap: 5px; padding: 6px; }
+            .btn { width: 40px; height: 40px; font-size: 22px; }
+            .spotify-chip { padding: 9px 12px; font-size: 9px; letter-spacing: 0.6px; }
+            .lyric-meta { gap: 6px; }
+            .tab-btn { font-size: 9px; padding: 6px 10px; letter-spacing: 0.5px; }
+            .lyric-focus { min-height: 180px; gap: 7px; }
+            .lyric-line { font-size: 0.95rem; }
+            .player { gap: 6px; padding: 7px 9px; }
+            .icon-btn { width: 34px; height: 34px; font-size: 12px; }
+            .cover { display: none !important; }
+            .track-title { font-size: 10px; }
+            .track-artist { font-size: 8px; }
+            .status { white-space: normal; line-height: 1.45; letter-spacing: 1px; }
+            .offset span { min-width: 38px; }
+        }
+
+        @media (max-height: 560px) {
+            .ui-container { padding: 10px 16px 8px; gap: 6px; }
+            .controls { padding: 5px 6px; }
+            .btn { width: 38px; height: 38px; font-size: 21px; }
+            .spotify-chip { padding: 7px 12px; }
+            .lyric-meta { min-height: 26px; gap: 6px; }
+            .tab-btn { padding: 5px 10px; font-size: 9px; }
+            .lyric-focus { min-height: 100px; gap: 4px; }
+            .lyric-line { font-size: 0.9rem; }
+            .player { padding: 5px 10px; }
+            .icon-btn { width: 32px; height: 32px; font-size: 12px; }
+            .status { font-size: 9px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            body.mode-fire .lyric-line.active { animation: none; }
+            .lyric-line { transition-duration: 0.01s; }
+        }
+    </style>
+</head>
+<body class="mode-fire is-paused">
+
+    <canvas id="vibeCanvas"></canvas>
+    <div class="frost-overlay"></div>
+    <div class="fire-overlay"></div>
+
+    <main class="ui-container">
+        <header class="controls">
+            <button type="button" class="btn btn-fire active" id="btnFire" onclick="setMode('fire')" aria-pressed="true" aria-label="Mode api" title="Api (1)">🔥</button>
+            <button type="button" class="btn btn-ice" id="btnIce" onclick="setMode('ice')" aria-pressed="false" aria-label="Mode salju" title="Salju (2)">❄️</button>
+            <button type="button" class="btn btn-sakura" id="btnSakura" onclick="setMode('sakura')" aria-pressed="false" aria-label="Mode sakura" title="Sakura (3)">🌸</button>
+            <button type="button" class="btn btn-sunset" id="btnSunset" onclick="setMode('sunset')" aria-pressed="false" aria-label="Mode senja" title="Senja (4)">🍁</button>
+            <button type="button" class="btn btn-day" id="btnDay" onclick="setMode('day')" aria-pressed="false" aria-label="Mode siang" title="Siang (5)">☀️</button>
+            <button type="button" class="btn btn-night" id="btnNight" onclick="setMode('night')" aria-pressed="false" aria-label="Mode malam kota" title="Malam (6)">🌙</button>
+            <div class="spotify-chip" id="spotifyChip">
+                <span class="dot" aria-hidden="true"></span>
+                <span id="spotifyChipText">Menghubungkan…</span>
+            </div>
+        </header>
+
+        <section class="lyrics-wrapper">
+            <div class="lyric-meta">
+                <div class="lyric-tabs" id="lyricTabs" aria-label="Pilihan bahasa lirik"></div>
+                <div class="meta-actions">
+                    <button type="button" class="mini-btn" id="refreshLyrics" title="Ambil ulang lirik" aria-label="Ambil ulang lirik">↻</button>
+                    <div class="offset" title="Koreksi sinkronisasi lirik">
+                        <button type="button" id="offsetDown" aria-label="Offset lirik mundur 0,5 detik">−</button>
+                        <span id="offsetLabel" title="Klik untuk reset offset">0.0s</span>
+                        <button type="button" id="offsetUp" aria-label="Offset lirik maju 0,5 detik">+</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lyric-focus" id="lyricFocus" aria-live="polite">
+                <div class="lyric-line" id="prevLyric"></div>
+                <div class="lyric-line active" id="currLyric">Menghubungkan ke Spotify…</div>
+                <div class="lyric-line" id="nextLyric">Pastikan Spotify terbuka dan memutar lagu</div>
+            </div>
+        </section>
+
+        <footer class="bottom">
+            <div class="player">
+                <button type="button" class="icon-btn" id="prevTrack" title="Lagu sebelumnya" aria-label="Lagu sebelumnya" disabled>⏮</button>
+                <button type="button" class="icon-btn" id="playPause" title="Putar / jeda (Spasi)" aria-label="Putar atau jeda" disabled>▶</button>
+                <button type="button" class="icon-btn" id="nextTrack" title="Lagu berikutnya" aria-label="Lagu berikutnya" disabled>⏭</button>
+                <img class="cover" id="cover" alt="Cover album">
+                <div class="track">
+                    <div class="track-title" id="trackTitle">Menunggu Spotify…</div>
+                    <div class="track-artist" id="trackArtist">Buka Spotify dan putar lagu</div>
+                    <div class="track-row">
+                        <span id="currentTime">0:00</span>
+                        <input type="range" class="progress" id="progress" min="0" max="1000" value="0" step="1" disabled aria-label="Posisi lagu">
+                        <span id="duration">0:00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="status" id="statusText">Menghubungkan ke Spotify…</div>
+        </footer>
+    </main>
+
+    <script>
+        'use strict';
+
+        /* =========================================================
+           CANVAS & RESIZE
+           ========================================================= */
+        const canvas = document.getElementById('vibeCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        let dpr = 1;
+
+        function resize() {
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = Math.round(width * dpr);
+            canvas.height = Math.round(height * dpr);
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+        }
+
+        resize();
+        window.addEventListener('resize', resize);
+
+        /* =========================================================
+           ELEMENTS & STATE
+           ========================================================= */
+        const el = (id) => document.getElementById(id);
+
+        const spotifyChipEl = el('spotifyChip');
+        const spotifyChipTextEl = el('spotifyChipText');
+        const lyricTabsEl = el('lyricTabs');
+        const lyricMetaEl = document.querySelector('.lyric-meta');
+        const prevLyricEl = el('prevLyric');
+        const currLyricEl = el('currLyric');
+        const nextLyricEl = el('nextLyric');
+        const refreshBtn = el('refreshLyrics');
+        const offsetLabel = el('offsetLabel');
+        const offsetDown = el('offsetDown');
+        const offsetUp = el('offsetUp');
+        const playPauseBtn = el('playPause');
+        const prevTrackBtn = el('prevTrack');
+        const nextTrackBtn = el('nextTrack');
+        const coverEl = el('cover');
+        const trackTitleEl = el('trackTitle');
+        const trackArtistEl = el('trackArtist');
+        const progressEl = el('progress');
+        const currentTimeEl = el('currentTime');
+        const durationEl = el('duration');
+        const statusEl = el('statusText');
+
+        const MODES = ['fire', 'ice', 'sakura', 'sunset', 'day', 'night'];
+        const SCENES = {
+            sakura: { sky: ['#713251', '#c27898', '#f2b6cc'], rgb: '255, 164, 201', sun: null },
+            sunset: { sky: ['#663c65', '#e47c51', '#ffc178'], rgb: '255, 173, 83', sun: '#ff9d35' },
+            day: { sky: ['#238bd3', '#69c5f4', '#c5ecff'], rgb: '255, 229, 110', sun: '#ffdc42' },
+            night: { sky: ['#05091c', '#101b3b', '#354065'], rgb: '195, 214, 255', sun: null },
+        };
+        let currentMode = 'fire';
+
+        const spotify = {
+            connected: false,
+            hasTrack: false,
+            playing: false,
+            position: 0,
+            baseAt: 0,
+            duration: 0,
+            trackId: '',
+            trackKey: '',
+            title: '',
+            artist: '',
+            album: '',
+            artUrl: '',
+        };
+
+        let lyrics = null;
+        let activeViewId = 'original';
+        let currentLineIndex = -2;
+        let lyricSwapTimer = null;
+        let lyricSwapToken = 0;
+        let lyricsAbort = null;
+        let lyricsLoading = false;
+        let lyricsForTrack = null;
+        let pollTimer = null;
+        let polling = false;
+        let isSeeking = false;
+        let lastUiUpdate = 0;
+
+        let offsetSec = readOffset();
+
+        const NUM_BARS = 64;
+        const freqValues = new Array(NUM_BARS).fill(0);
+
+        /* =========================================================
+           MODE
+           ========================================================= */
+        function setMode(mode) {
+            if (!MODES.includes(mode)) return;
+
+            const changed = mode !== currentMode;
+            currentMode = mode;
+
+            for (const name of MODES) {
+                const selected = mode === name;
+                document.body.classList.toggle('mode-' + name, selected);
+                const button = el('btn' + name[0].toUpperCase() + name.slice(1));
+                button.classList.toggle('active', selected);
+                button.setAttribute('aria-pressed', String(selected));
+            }
+
+            if (changed) {
+                particles = [];
+                initParticles();
+            }
+        }
+
+        /* =========================================================
+           OFFSET
+           ========================================================= */
+        function readOffset() {
+            const stored = parseFloat(localStorage.getItem('av-lyric-offset') || '0');
+            return Number.isFinite(stored) ? Math.max(-15, Math.min(15, stored)) : 0;
+        }
+
+        function applyOffset(value) {
+            offsetSec = Math.max(-15, Math.min(15, Math.round(value * 10) / 10));
+            localStorage.setItem('av-lyric-offset', String(offsetSec));
+            offsetLabel.textContent = (offsetSec > 0 ? '+' : '') + offsetSec.toFixed(1) + 's';
+            currentLineIndex = -2;
+            if (lyrics) updateLyricsPosition(estimatedPosition(), true);
+        }
+
+        offsetLabel.textContent = (offsetSec > 0 ? '+' : '') + offsetSec.toFixed(1) + 's';
+        offsetDown.addEventListener('click', () => applyOffset(offsetSec - 0.5));
+        offsetUp.addEventListener('click', () => applyOffset(offsetSec + 0.5));
+        offsetLabel.addEventListener('click', () => applyOffset(0));
+
+        /* =========================================================
+           LIRIK — BUILD & RENDER
+           ========================================================= */
+        function sameLines(left, right) {
+            if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+            for (let i = 0; i < left.length; i++) {
+                const a = String(left[i] ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+                const b = String(right[i] ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+                if (a !== b) return false;
+            }
+            return true;
+        }
+
+        function buildViews(data) {
+            const texts = data.lines.map((line) => line.text);
+            const views = [{ id: 'original', label: 'Original', lines: texts }];
+
+            if (window.AVRomaji) {
+                const language = window.AVRomaji.detectLanguage(texts.join(' '));
+                if (language !== 'en') {
+                    const romaji = texts.map((text) => window.AVRomaji.romanize(text));
+                    if (!sameLines(romaji, texts)) {
+                        views.push({ id: 'romaji', label: 'Romaji', lines: romaji });
+                    }
+                }
+            }
+
+            const labels = { en: 'English', id: 'Indonesia' };
+            for (const code of ['en', 'id']) {
+                const translated = data.translations && data.translations[code];
+                if (Array.isArray(translated) && translated.length === texts.length && !sameLines(translated, texts)) {
+                    views.push({ id: 'lang:' + code, label: labels[code], lines: translated });
+                }
+            }
+
+            return views;
+        }
+
+        function activeView() {
+            if (!lyrics || !lyrics.views) return null;
+            return lyrics.views.find((view) => view.id === activeViewId) || lyrics.views[0] || null;
+        }
+
+        function renderTabs() {
+            lyricTabsEl.textContent = '';
+
+            if (!lyrics || !lyrics.views || !lyrics.views.length) {
+                lyricMetaEl.classList.add('is-empty');
+                const empty = document.createElement('span');
+                empty.className = 'tabs-empty';
+                empty.textContent = '—';
+                lyricTabsEl.appendChild(empty);
+                return;
+            }
+
+            lyricMetaEl.classList.remove('is-empty');
+
+            for (const view of lyrics.views) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'tab-btn' + (view.id === activeViewId ? ' active' : '');
+                button.textContent = view.label;
+                button.addEventListener('click', () => selectView(view.id));
+                lyricTabsEl.appendChild(button);
+            }
+        }
+
+        function selectView(id) {
+            if (!lyrics || !lyrics.views.some((view) => view.id === id)) return;
+            activeViewId = id;
+            renderTabs();
+            currentLineIndex = -2;
+            updateLyricsPosition(estimatedPosition(), true);
+        }
+
+        function renderLine(animate) {
+            const view = activeView();
+            if (!view) return;
+
+            const texts = view.lines;
+            const index = currentLineIndex;
+            let prev = '';
+            let curr = '';
+            let next = '';
+
+            if (index < 0) {
+                curr = '♪';
+                next = texts[0] || '';
+            } else {
+                prev = texts[index - 1] || '';
+                curr = texts[index] || '';
+                next = texts[index + 1] || '♪';
+            }
+
+            const apply = () => {
+                prevLyricEl.textContent = prev;
+                currLyricEl.textContent = curr;
+                nextLyricEl.textContent = next;
+            };
+
+            if (!animate) {
+                clearTimeout(lyricSwapTimer);
+                currLyricEl.classList.remove('is-switching');
+                apply();
+                return;
+            }
+
+            const token = ++lyricSwapToken;
+            clearTimeout(lyricSwapTimer);
+            currLyricEl.classList.add('is-switching');
+            lyricSwapTimer = setTimeout(() => {
+                if (token !== lyricSwapToken) return;
+                apply();
+                currLyricEl.classList.remove('is-switching');
+            }, 150);
+        }
+
+        function updateLyricsPosition(position, force) {
+            if (!lyrics || !lyrics.lines || !lyrics.lines.length) return;
+
+            const view = activeView();
+            if (!view) return;
+
+            const ms = (position + offsetSec) * 1000;
+            let index = -1;
+
+            for (let i = 0; i < lyrics.lines.length; i++) {
+                if (lyrics.lines[i].time <= ms) index = i;
+                else break;
+            }
+
+            if (index !== currentLineIndex || force) {
+                currentLineIndex = index;
+                renderLine(true);
+            }
+        }
+
+        function applyLyrics(data) {
+            lyrics = {
+                lines: data.lines,
+                translations: data.translations || {},
+                source: data.source || 'Lirik',
+                synced: !!data.synced,
+                cached: !!data.cached,
+                views: [],
+            };
+            lyrics.views = buildViews(lyrics);
+
+            if (!lyrics.views.some((view) => view.id === activeViewId)) {
+                activeViewId = 'original';
+            }
+
+            renderTabs();
+            currentLineIndex = -2;
+            updateLyricsPosition(estimatedPosition(), true);
+
+            const syncLabel = lyrics.synced ? 'sinkron' : 'perkiraan (tanpa timestamp)';
+            statusEl.textContent = 'Lirik: ' + lyrics.source + ' · ' + syncLabel + (lyrics.cached ? ' · cache' : '');
+        }
+
+        function showLyricMessage(current, next, note) {
+            const nextText = next || '';
+            if (!lyrics && currLyricEl.textContent === current &&
+                nextLyricEl.textContent === nextText &&
+                (note === undefined || statusEl.textContent === note)) {
+                return;
+            }
+
+            if (lyrics) {
+                lyrics = null;
+                renderTabs();
+            }
+
+            clearTimeout(lyricSwapTimer);
+            currLyricEl.classList.remove('is-switching');
+            prevLyricEl.textContent = '';
+            currLyricEl.textContent = current;
+            nextLyricEl.textContent = nextText;
+            currentLineIndex = -2;
+
+            if (note) statusEl.textContent = note;
+        }
+
+        /* =========================================================
+           LIRIK — FETCH
+           ========================================================= */
+        function buildTrack() {
+            return {
+                key: spotify.trackKey,
+                title: spotify.title,
+                artist: spotify.artist,
+                album: spotify.album,
+                duration: spotify.duration,
+            };
+        }
+
+        async function loadLyrics(track, refresh) {
+            if (!track || !track.key) return;
+
+            if (lyricsAbort) lyricsAbort.abort();
+            lyricsAbort = new AbortController();
+            lyricsLoading = true;
+            refreshBtn.classList.add('is-busy');
+
+            if (!refresh) {
+                showLyricMessage('Mencari lirik…', 'LRCLIB / lyrics.ovh', 'Mencari lirik…');
+            } else {
+                statusEl.textContent = 'Mengambil ulang lirik…';
+            }
+
+            const key = track.key;
+            const params = new URLSearchParams({
+                title: track.title || '',
+                artist: track.artist || '',
+                album: track.album || '',
+                duration: String(track.duration || 0),
+            });
+            if (refresh) params.set('refresh', '1');
+
+            try {
+                const response = await fetch('/api/lyrics?' + params.toString(), {
+                    signal: lyricsAbort.signal,
+                    cache: 'no-store',
+                });
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+                if (key !== spotify.trackKey) return;
+
+                if (!data.lines || !data.lines.length) {
+                    showLyricMessage(
+                        'Lirik tidak ditemukan',
+                        'Coba lagu lain atau tambahkan file .lrc lokal',
+                        data.error || 'Lirik tidak ditemukan'
+                    );
+                    return;
+                }
+
+                applyLyrics(data);
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                if (key !== spotify.trackKey) return;
+                showLyricMessage(
+                    'Gagal mengambil lirik',
+                    'Periksa koneksi internet lalu klik ↻',
+                    'Gagal mengambil lirik'
+                );
+            } finally {
+                if (key === spotify.trackKey) {
+                    lyricsLoading = false;
+                    refreshBtn.classList.remove('is-busy');
+                }
+            }
+        }
+
+        refreshBtn.addEventListener('click', () => {
+            if (!spotify.hasTrack || lyricsLoading) return;
+            loadLyrics(buildTrack(), true);
+        });
+
+        /* =========================================================
+           SPOTIFY — STATE & POLLING
+           ========================================================= */
+        function estimatedPosition() {
+            return spotify.position + (spotify.playing ? (performance.now() - spotify.baseAt) / 1000 : 0);
+        }
+
+        function formatTime(seconds) {
+            if (!isFinite(seconds) || seconds < 0) return '0:00';
+            const minutes = Math.floor(seconds / 60);
+            const rest = Math.floor(seconds % 60);
+            return minutes + ':' + String(rest).padStart(2, '0');
+        }
+
+        function setSpotifyChip(online) {
+            spotifyChipEl.classList.toggle('is-on', online);
+            spotifyChipEl.classList.toggle('is-off', !online);
+            spotifyChipTextEl.textContent = online ? 'Spotify · terhubung' : 'Spotify · offline';
+        }
+
+        function updateSpotifyUI() {
+            const active = spotify.connected && spotify.hasTrack;
+
+            playPauseBtn.disabled = !active;
+            prevTrackBtn.disabled = !active;
+            nextTrackBtn.disabled = !active;
+            playPauseBtn.textContent = spotify.playing ? '❚❚' : '▶';
+            playPauseBtn.setAttribute('aria-label', spotify.playing ? 'Jeda' : 'Putar');
+            progressEl.disabled = !active || !(spotify.duration > 0);
+
+            if (active) {
+                trackTitleEl.textContent = spotify.title || 'Tanpa judul';
+                trackArtistEl.textContent = [spotify.artist, spotify.album].filter(Boolean).join(' · ') || 'Spotify';
+                document.title = (spotify.title || 'Spotify') + ' — Audio Vibe';
+            } else {
+                trackTitleEl.textContent = spotify.connected ? 'Spotify siap — putar lagu' : 'Menunggu Spotify…';
+                trackArtistEl.textContent = spotify.connected ? 'Pilih lagu di aplikasi Spotify' : 'Buka Spotify dan putar lagu';
+                document.title = 'Audio Vibe — Spotify & Lirik';
+            }
+
+            coverEl.classList.toggle('is-visible', !!spotify.artUrl && active);
+
+            const paused = !(spotify.connected && spotify.hasTrack && spotify.playing);
+            document.body.classList.toggle('is-paused', paused);
+        }
+
+        function updateProgressUI() {
+            const position = Math.max(0, estimatedPosition());
+            const duration = spotify.duration || 0;
+
+            if (!isSeeking && duration > 0) {
+                const ratio = Math.max(0, Math.min(1, position / duration));
+                progressEl.value = String(Math.round(ratio * 1000));
+            }
+
+            currentTimeEl.textContent = formatTime(position);
+            durationEl.textContent = formatTime(duration);
+        }
+
+        function setCover(url) {
+            if (!url) {
+                coverEl.removeAttribute('src');
+                coverEl.classList.remove('is-visible');
+                return;
+            }
+
+            const proxied = '/api/art?url=' + encodeURIComponent(url);
+            if (coverEl.dataset.source === proxied) return;
+
+            coverEl.dataset.source = proxied;
+            coverEl.src = proxied;
+        }
+
+        function handleDisconnected() {
+            spotify.connected = false;
+            spotify.hasTrack = false;
+            spotify.playing = false;
+            spotify.trackKey = '';
+            spotify.trackId = '';
+            spotify.title = '';
+            spotify.artist = '';
+            spotify.album = '';
+            spotify.artUrl = '';
+            spotify.duration = 0;
+            spotify.position = 0;
+
+            if (lyricsAbort) {
+                lyricsAbort.abort();
+                lyricsAbort = null;
+            }
+            lyricsLoading = false;
+            lyricsForTrack = null;
+            refreshBtn.classList.remove('is-busy');
+
+            setSpotifyChip(false);
+            setCover('');
+            showLyricMessage('Spotify tidak terdeteksi', 'Buka Spotify dan putar lagu', 'Spotify tidak terdeteksi — buka aplikasi Spotify');
+            updateSpotifyUI();
+        }
+
+        function onNowPlaying(data) {
+            if (!data || !data.connected) {
+                handleDisconnected();
+                return;
+            }
+
+            const now = performance.now();
+            const key = data.trackId || ((data.title || '') + '|' + (data.artist || ''));
+            const trackChanged = key !== spotify.trackKey;
+            const stateChanged = !!data.playing !== spotify.playing;
+            const previousEstimate = estimatedPosition();
+
+            spotify.connected = true;
+            spotify.hasTrack = !!(data.title || data.artist);
+            spotify.trackKey = key;
+            spotify.trackId = data.trackId || '';
+            spotify.title = data.title || '';
+            spotify.artist = data.artist || '';
+            spotify.album = data.album || '';
+            spotify.artUrl = data.artUrl || '';
+            spotify.duration = Number(data.duration) || 0;
+            spotify.playing = !!data.playing;
+
+            const shouldResync =
+                trackChanged ||
+                stateChanged ||
+                !spotify.playing ||
+                !spotify.hasTrack ||
+                Math.abs((Number(data.position) || 0) - previousEstimate) > 0.4;
+
+            if (shouldResync) {
+                spotify.position = Number(data.position) || 0;
+                spotify.baseAt = now;
+            }
+
+            setSpotifyChip(true);
+            setCover(spotify.artUrl);
+            updateSpotifyUI();
+
+            if (trackChanged && spotify.hasTrack) {
+                lyricsForTrack = key;
+                lyrics = null;
+                activeViewId = 'original';
+                currentLineIndex = -2;
+                renderTabs();
+                showLyricMessage('Mencari lirik…', 'LRCLIB / lyrics.ovh', 'Mencari lirik…');
+                loadLyrics(buildTrack(), false);
+            } else if (!spotify.hasTrack) {
+                lyricsForTrack = null;
+                showLyricMessage('Tidak ada lagu', 'Putar lagu di Spotify', 'Spotify terhubung — belum ada lagu yang diputar');
+            } else if (lyricsForTrack !== key && !lyricsLoading) {
+                lyricsForTrack = key;
+                loadLyrics(buildTrack(), false);
+            }
+        }
+
+        async function pollNow() {
+            pollTimer = null;
+            if (polling) return;
+            polling = true;
+
+            try {
+                const response = await fetch('/api/now-playing', { cache: 'no-store' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                onNowPlaying(await response.json());
+            } catch (err) {
+                handleDisconnected();
+            } finally {
+                polling = false;
+                if (!pollTimer) {
+                    pollTimer = setTimeout(pollNow, spotify.connected ? 1000 : 2000);
+                }
+            }
+        }
+
+        function schedulePoll(delay) {
+            if (pollTimer) clearTimeout(pollTimer);
+            pollTimer = setTimeout(pollNow, delay);
+        }
+
+        /* =========================================================
+           SPOTIFY — CONTROLS
+           ========================================================= */
+        async function sendControl(action, extra) {
+            try {
+                const response = await fetch('/api/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({ action: action }, extra || {})),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Kontrol Spotify gagal');
+                if (data.now) onNowPlaying(data.now);
+            } catch (err) {
+                statusEl.textContent = err.message || 'Kontrol Spotify gagal';
+            } finally {
+                schedulePoll(350);
+            }
+        }
+
+        function togglePlayback() {
+            if (!spotify.connected || !spotify.hasTrack) return;
+            sendControl('play_pause');
+        }
+
+        function seekTo(position) {
+            if (!spotify.connected || !spotify.hasTrack) return;
+            const duration = spotify.duration || position;
+            const target = Math.max(0, Math.min(duration, position));
+
+            spotify.position = target;
+            spotify.baseAt = performance.now();
+            updateProgressUI();
+            if (lyrics) updateLyricsPosition(target, true);
+
+            sendControl('seek', { position: target });
+        }
+
+        playPauseBtn.addEventListener('click', togglePlayback);
+        prevTrackBtn.addEventListener('click', () => sendControl('previous'));
+        nextTrackBtn.addEventListener('click', () => sendControl('next'));
+
+        progressEl.addEventListener('input', () => {
+            isSeeking = true;
+            if (spotify.duration > 0) {
+                const target = (Number(progressEl.value) / 1000) * spotify.duration;
+                currentTimeEl.textContent = formatTime(target);
+                if (lyrics) updateLyricsPosition(target, false);
+            }
+        });
+
+        progressEl.addEventListener('change', () => {
+            const target = spotify.duration > 0
+                ? (Number(progressEl.value) / 1000) * spotify.duration
+                : 0;
+            isSeeking = false;
+            seekTo(target);
+        });
+
+        coverEl.addEventListener('error', () => {
+            coverEl.classList.remove('is-visible');
+        });
+
+        /* =========================================================
+           ROMAJI (modul dari proyek spotify-lyrics-widget)
+           ========================================================= */
+        window.addEventListener('av-romaji-ready', () => {
+            if (!lyrics) return;
+
+            const previous = activeViewId;
+            lyrics.views = buildViews(lyrics);
+            if (!lyrics.views.some((view) => view.id === previous)) {
+                activeViewId = 'original';
+            }
+            renderTabs();
+            currentLineIndex = -2;
+            renderLine(false);
+        });
+
+        /* =========================================================
+           KEYBOARD
+           ========================================================= */
+        document.addEventListener('keydown', (event) => {
+            const tag = (event.target && event.target.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+            if (event.code === 'Space') {
+                event.preventDefault();
+                togglePlayback();
+            } else if (/^[1-6]$/.test(event.key)) {
+                setMode(MODES[Number(event.key) - 1]);
+            } else if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                seekTo(estimatedPosition() - 5);
+            } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                seekTo(estimatedPosition() + 5);
+            }
+        });
+
+        /* =========================================================
+           PARTICLES
+           ========================================================= */
+        let particles = [];
+
+        class Particle {
+            constructor(initial) {
+                this.reset(initial);
+            }
+
+            reset(initial) {
+                this.phase = Math.random() * Math.PI * 2;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.spin = (Math.random() - 0.5) * 0.025;
+                if (SCENES[currentMode]) {
+                    this.x = Math.random() * width;
+                    this.y = currentMode === 'night'
+                        ? Math.random() * height * 0.58
+                        : (initial ? Math.random() * height : -30 - Math.random() * 80);
+                    this.size = currentMode === 'sakura' ? 5 + Math.random() * 7 : 1 + Math.random() * 2.5;
+                    this.speedY = currentMode === 'sakura' ? 0.5 + Math.random() * 1.1 : 0.15 + Math.random() * 0.4;
+                    this.speedX = 0.15 + Math.random() * 0.6;
+                    this.color = currentMode === 'sakura'
+                        ? 'hsl(' + (335 + Math.random() * 15) + ', 90%, ' + (75 + Math.random() * 18) + '%)'
+                        : 'rgba(' + SCENES[currentMode].rgb + ', 0.65)';
+                    return;
+                }
+                if (currentMode === 'fire') {
+                    const volcano = volcanoLayout();
+                    const eruption = 0.65 + Math.pow(Math.max(0, Math.sin(time * 0.65)), 2) * 0.7;
+                    this.x = volcano.x + (Math.random() - 0.5) * volcano.crater * 1.3;
+                    this.y = volcano.y;
+                    this.size = Math.random() * 3.5 + 1.5;
+                    this.speedY = -(Math.random() * 3 + 2.5) * eruption * Math.min(height / 650, 1.3);
+                    this.speedX = (Math.random() - 0.5) * 3.2 * Math.min(width / 700, 1.2);
+                    this.color = 'hsl(' + (Math.random() * 40) + ', 100%, ' + (Math.random() * 25 + 55) + '%)';
+                    this.life = 180;
+                    this.decay = 1;
+                    if (initial) {
+                        const age = Math.random() * 120;
+                        this.x += this.speedX * age;
+                        this.y += this.speedY * age + 0.5 * 0.045 * age * age;
+                        this.speedY += 0.045 * age;
+                        this.life -= age;
+                    }
+                } else {
+                    this.x = Math.random() * width;
+                    this.y = initial ? Math.random() * height : -20 - Math.random() * 120;
+                    this.size = Math.random() * 3.5 + 1;
+                    this.speedY = Math.random() * 1.3 + 0.45;
+                    this.speedX = (Math.random() - 0.5) * 0.7;
+                    this.color = 'rgba(200, 240, 255, ' + (Math.random() * 0.65 + 0.3) + ')';
+                    this.life = Infinity;
+                    this.decay = 0;
+                }
+            }
+
+            update(bassBoost) {
+                if (SCENES[currentMode]) {
+                    this.phase += 0.015;
+                    if (currentMode === 'night') {
+                        if (this.x > width || this.y > height * 0.58) this.reset(true);
+                        return;
+                    }
+                    this.rotation += this.spin;
+                    this.y += this.speedY * (1 + bassBoost * 0.4);
+                    this.x += this.speedX + Math.sin(this.phase) * 0.65;
+                    if (this.y > height + 30 || this.x > width + 30) this.reset(false);
+                    return;
+                }
+                if (currentMode === 'fire') {
+                    this.speedY += 0.045;
+                    this.y += this.speedY * (1 + bassBoost * 0.15);
+                    this.x += this.speedX;
+                    this.life -= this.decay;
+                    if (this.size > 0.4) this.size -= 0.008;
+                    if (this.life <= 0 || this.y > height + 30 || this.x < -30 || this.x > width + 30) this.reset(false);
+                } else {
+                    this.y += this.speedY + bassBoost * 0.5;
+                    this.x += this.speedX + Math.cos(this.y * 0.01) * 0.45;
+                    if (this.y > height + 20 || this.x < -20 || this.x > width + 20) this.reset(false);
+                }
+            }
+
+            draw() {
+                if (currentMode === 'sakura') {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.rotation);
+                    ctx.scale(this.size, this.size * (0.45 + Math.abs(Math.sin(this.phase)) * 0.55));
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 1);
+                    ctx.bezierCurveTo(-1.3, 0.2, -1, -1.2, -0.25, -0.95);
+                    ctx.lineTo(0, -0.6);
+                    ctx.lineTo(0.25, -0.95);
+                    ctx.bezierCurveTo(1, -1.2, 1.3, 0.2, 0, 1);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(200, 75, 130, 0.3)';
+                    ctx.lineWidth = 0.07;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0.8);
+                    ctx.quadraticCurveTo(-0.15, 0, 0, -0.5);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
+                if (SCENES[currentMode]) {
+                    ctx.globalAlpha = 0.3 + (Math.sin(this.phase) + 1) * 0.25;
+                }
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, Math.max(this.size, 0.2), 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+
+                if (currentMode === 'fire') {
+                    ctx.shadowBlur = 14;
+                    ctx.shadowColor = '#ff3300';
+                } else {
+                    ctx.shadowBlur = 8;
+                    ctx.shadowColor = SCENES[currentMode] ? 'rgb(' + SCENES[currentMode].rgb + ')' : '#7fdcff';
+                }
+
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        function initParticles() {
+            const compact = width < 700 || height < 600;
+            const count = SCENES[currentMode]
+                ? (currentMode === 'sakura' ? (compact ? 45 : 85) : (compact ? 25 : 45))
+                : (currentMode === 'fire' ? (compact ? 80 : 150) : (compact ? 70 : 120));
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(true));
+            }
+        }
+
+        /* =========================================================
+           VISUALS
+           ========================================================= */
+        function volcanoLayout() {
+            return { x: width * 0.5, y: height * 0.63, crater: Math.min(width * 0.065, 55) };
+        }
+
+        function drawVolcano(bass) {
+            const { x, y, crater } = volcanoLayout();
+            const eruption = 0.65 + Math.pow(Math.max(0, Math.sin(time * 0.65)), 2) * 0.7;
+            const sky = ctx.createLinearGradient(0, 0, 0, height);
+            sky.addColorStop(0, '#100b17');
+            sky.addColorStop(0.6, '#431b23');
+            sky.addColorStop(1, '#a2381d');
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, width, height);
+
+            const glowRadius = Math.max(width, height) * 0.6;
+            const glow = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
+            glow.addColorStop(0, 'rgba(255, 95, 20, ' + (0.3 + eruption * 0.12) + ')');
+            glow.addColorStop(1, 'rgba(255, 60, 0, 0)');
+            ctx.fillStyle = glow;
+            ctx.fillRect(0, 0, width, height);
+
+            for (let i = 0; i < 12; i++) {
+                const phase = (time * 0.08 + i / 12) % 1;
+                const radius = (15 + phase * 100) * Math.min(width / 700, 1.3);
+                ctx.fillStyle = 'rgba(44, 33, 43, ' + ((1 - phase) * 0.3) + ')';
+                ctx.beginPath();
+                ctx.arc(x + Math.sin(i * 2.4 + phase * 2) * phase * width * 0.14,
+                    y - phase * height * 0.6, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const rock = ctx.createLinearGradient(0, y, 0, height);
+            rock.addColorStop(0, '#321b23');
+            rock.addColorStop(1, '#120f18');
+            ctx.fillStyle = rock;
+            ctx.beginPath();
+            ctx.moveTo(-width * 0.05, height);
+            ctx.lineTo(x - width * 0.24, y + height * 0.2);
+            ctx.lineTo(x - crater * 1.3, y - 4);
+            ctx.quadraticCurveTo(x, y + 14, x + crater * 1.3, y - 4);
+            ctx.lineTo(x + width * 0.26, y + height * 0.23);
+            ctx.lineTo(width * 1.05, height);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.save();
+            ctx.lineCap = 'round';
+            for (let i = 0; i < 5; i++) {
+                const spread = (i - 2) / 2;
+                const endX = x + spread * width * 0.3;
+                ctx.beginPath();
+                ctx.moveTo(x + spread * crater * 0.7, y + 5);
+                ctx.bezierCurveTo(x + spread * width * 0.06, y + height * 0.12,
+                    endX - width * 0.035, height * 0.88, endX, height);
+                ctx.strokeStyle = '#8b2817';
+                ctx.lineWidth = Math.max(7, width * 0.012);
+                ctx.stroke();
+                ctx.strokeStyle = 'rgba(255, 82, 15, ' + (0.55 + Math.sin(time + i) * 0.15) + ')';
+                ctx.shadowBlur = 14;
+                ctx.shadowColor = '#ff4d00';
+                ctx.lineWidth = Math.max(3, width * 0.005);
+                ctx.stroke();
+                ctx.strokeStyle = '#ffc05c';
+                ctx.lineWidth = Math.max(1, width * 0.0015);
+                ctx.setLineDash([14, 30, 6, 24]);
+                ctx.lineDashOffset = -time * 24;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            ctx.fillStyle = '#ffb548';
+            ctx.shadowBlur = 25 + bass * 15;
+            ctx.shadowColor = '#ff5500';
+            ctx.beginPath();
+            ctx.ellipse(x, y + 3, crater * 1.1, Math.max(4, height * 0.01), 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function sceneNoise(seed) {
+            const value = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+            return value - Math.floor(value);
+        }
+
+        function drawNightCity() {
+            const moonX = width * 0.78;
+            const moonY = height * 0.22;
+            const radius = Math.min(width, height) * 0.065;
+            const halo = ctx.createRadialGradient(moonX, moonY, radius * 0.7, moonX, moonY, radius * 5);
+            halo.addColorStop(0, 'rgba(225, 235, 255, 0.35)');
+            halo.addColorStop(1, 'rgba(200, 220, 255, 0)');
+            ctx.fillStyle = halo;
+            ctx.fillRect(moonX - radius * 5, moonY - radius * 5, radius * 10, radius * 10);
+            ctx.save();
+            ctx.fillStyle = '#f9fbff';
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = '#e6eeff';
+            ctx.beginPath();
+            ctx.arc(moonX, moonY, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(163, 180, 205, 0.12)';
+            for (let i = 0; i < 7; i++) {
+                ctx.beginPath();
+                ctx.arc(moonX + (sceneNoise(i) - 0.5) * radius,
+                    moonY + (sceneNoise(i + 20) - 0.5) * radius,
+                    radius * (0.08 + sceneNoise(i + 40) * 0.13), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            for (let layer = 0; layer < 2; layer++) {
+                const count = Math.max(8, Math.ceil(width / (layer ? 70 : 55)));
+                const step = width / count;
+                const baseY = height * (layer ? 1 : 0.91);
+                for (let i = 0; i < count; i++) {
+                    const seed = i + layer * 80;
+                    const buildingHeight = height * (0.12 + sceneNoise(seed) * (layer ? 0.22 : 0.26));
+                    const x = i * step;
+                    const top = baseY - buildingHeight;
+                    ctx.fillStyle = layer ? '#080e21' : '#17213c';
+                    ctx.fillRect(x, top, step + 1, height - top);
+                    if (i % 4 === 0) {
+                        ctx.fillRect(x + step * 0.5, top - height * 0.035, 2, height * 0.035);
+                    }
+                    const spacing = layer ? 13 : 16;
+                    for (let row = 0; row < Math.floor(buildingHeight / spacing) - 1; row++) {
+                        for (let col = 0; col < Math.floor(step / 12) - 1; col++) {
+                            const light = sceneNoise(seed * 301 + row * 17 + col * 7);
+                            if (light < 0.4) continue;
+                            ctx.fillStyle = light > 0.8 ? 'rgba(170, 205, 255, 0.6)' : 'rgba(255, 215, 145, 0.55)';
+                            ctx.fillRect(x + 7 + col * 12, top + 10 + row * spacing, 3, 5);
+                        }
+                    }
+                }
+            }
+        }
+
+        function drawScene(bass) {
+            const scene = SCENES[currentMode];
+            const sky = ctx.createLinearGradient(0, 0, 0, height);
+            scene.sky.forEach((color, index) => sky.addColorStop(index / 2, color));
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, width, height);
+
+            if (currentMode === 'night') drawNightCity();
+
+            if (scene.sun) {
+                const sunset = currentMode === 'sunset';
+                const x = width * (sunset ? 0.73 : 0.8);
+                const y = height * (sunset ? 0.65 : 0.23);
+                const radius = Math.min(width, height) * (sunset ? 0.11 : 0.07);
+                const glow = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 5);
+                glow.addColorStop(0, 'rgba(' + scene.rgb + ', 0.65)');
+                glow.addColorStop(1, 'rgba(' + scene.rgb + ', 0)');
+                ctx.fillStyle = glow;
+                ctx.fillRect(x - radius * 5, y - radius * 5, radius * 10, radius * 10);
+
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(time * 0.015);
+                const reach = Math.max(width, height);
+                for (let i = 0; i < 10; i++) {
+                    ctx.rotate(Math.PI / 5);
+                    const ray = ctx.createLinearGradient(0, 0, 0, reach);
+                    ray.addColorStop(0, 'rgba(' + scene.rgb + ', ' + (0.1 + bass * 0.08) + ')');
+                    ray.addColorStop(1, 'rgba(' + scene.rgb + ', 0)');
+                    ctx.fillStyle = ray;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(-reach * 0.09, reach);
+                    ctx.lineTo(reach * 0.09, reach);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.restore();
+                ctx.fillStyle = scene.sun;
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = scene.sun;
+                ctx.beginPath();
+                ctx.arc(x, y, radius * (1 + bass * 0.035), 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+
+            if (currentMode === 'day' || currentMode === 'sunset') {
+                ctx.fillStyle = currentMode === 'day' ? 'rgba(255, 255, 255, 0.55)' : 'rgba(255, 196, 161, 0.22)';
+                for (let i = 0; i < 6; i++) {
+                    const span = width + 360;
+                    const x = ((i * span / 6 + time * (i % 2 ? 5 : 3)) % span) - 180;
+                    const y = height * (0.15 + (i % 3) * 0.14);
+                    const scale = Math.min(width / 600, 1.3);
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, 85 * scale, 16 * scale, 0, 0, Math.PI * 2);
+                    ctx.ellipse(x - 25 * scale, y - 12 * scale, 35 * scale, 22 * scale, 0, 0, Math.PI * 2);
+                    ctx.ellipse(x + 15 * scale, y - 18 * scale, 42 * scale, 28 * scale, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function drawCore(bass) {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = 90 + bass * 120;
+            const grad = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, radius);
+
+            if (SCENES[currentMode]) {
+                grad.addColorStop(0, 'rgba(' + SCENES[currentMode].rgb + ', 0.2)');
+                grad.addColorStop(1, 'rgba(' + SCENES[currentMode].rgb + ', 0)');
+            } else if (currentMode === 'fire') {
+                grad.addColorStop(0, 'rgba(255, 255, 200, 0.22)');
+                grad.addColorStop(0.4, 'rgba(255, 80, 0, 0.12)');
+                grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+            } else {
+                grad.addColorStop(0, 'rgba(200, 255, 255, 0.14)');
+                grad.addColorStop(0.5, 'rgba(0, 150, 255, 0.08)');
+                grad.addColorStop(1, 'rgba(0, 0, 50, 0)');
+            }
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawVisualizer(values, bass) {
+            const halfWidth = width / 2;
+            const barWidth = halfWidth / NUM_BARS;
+            const centerX = width / 2;
+
+            for (let i = 0; i < NUM_BARS; i++) {
+                const percent = Math.min(1, (values[i] || 0) / 255);
+                let barHeight = percent * (height * 0.3);
+
+                if (SCENES[currentMode]) {
+                    barHeight *= 0.45;
+                    ctx.fillStyle = 'rgba(' + SCENES[currentMode].rgb + ', ' + (0.2 + percent * 0.55) + ')';
+                    ctx.shadowBlur = 8;
+                    ctx.shadowColor = 'rgb(' + SCENES[currentMode].rgb + ')';
+                    const xR = centerX + i * barWidth;
+                    const xL = centerX - (i + 1) * barWidth;
+                    ctx.fillRect(xR, height - barHeight, Math.max(barWidth - 3, 1), barHeight);
+                    ctx.fillRect(xL, height - barHeight, Math.max(barWidth - 3, 1), barHeight);
+                } else if (currentMode === 'fire') {
+                    ctx.fillStyle = 'hsl(' + (percent * 45) + ', 100%, ' + (48 + percent * 12) + '%)';
+                    ctx.shadowBlur = 18;
+                    ctx.shadowColor = '#ff2a00';
+
+                    const xR = centerX + i * barWidth;
+                    const xL = centerX - (i + 1) * barWidth;
+
+                    ctx.fillRect(xR, height - barHeight, Math.max(barWidth - 2, 1), barHeight);
+                    ctx.fillRect(xL, height - barHeight, Math.max(barWidth - 2, 1), barHeight);
+
+                    if (percent > 0.62 && Math.random() > 0.55) {
+                        ctx.fillStyle = '#fff4cc';
+                        ctx.fillRect(xR, height - barHeight - 8, Math.max(barWidth - 2, 1), 4);
+                        ctx.fillRect(xL, height - barHeight - 8, Math.max(barWidth - 2, 1), 4);
+                    }
+                } else {
+                    barHeight *= 0.6;
+                    ctx.fillStyle = 'rgba(150, 230, 255, ' + (0.15 + percent * 0.7) + ')';
+                    ctx.shadowBlur = 14;
+                    ctx.shadowColor = '#00ffff';
+
+                    const xR = centerX + i * barWidth;
+                    const xL = centerX - (i + 1) * barWidth;
+                    const y = height - barHeight;
+                    const tip = Math.max(4, barHeight * 0.12);
+
+                    ctx.beginPath();
+                    ctx.moveTo(xR, height);
+                    ctx.lineTo(xR, y);
+                    ctx.lineTo(xR + barWidth / 2, y - tip);
+                    ctx.lineTo(xR + barWidth, y);
+                    ctx.lineTo(xR + barWidth, height);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.moveTo(xL, height);
+                    ctx.lineTo(xL, y);
+                    ctx.lineTo(xL + barWidth / 2, y - tip);
+                    ctx.lineTo(xL + barWidth, y);
+                    ctx.lineTo(xL + barWidth, height);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+
+            const glowRadius = Math.min(width * 0.3, 300);
+            const seam = ctx.createRadialGradient(centerX, height, 0, centerX, height, glowRadius);
+            if (SCENES[currentMode]) {
+                seam.addColorStop(0, 'rgba(' + SCENES[currentMode].rgb + ', ' + (0.12 + bass * 0.15) + ')');
+                seam.addColorStop(1, 'rgba(' + SCENES[currentMode].rgb + ', 0)');
+            } else if (currentMode === 'fire') {
+                seam.addColorStop(0, 'rgba(255, 140, 30, ' + (0.16 + bass * 0.22) + ')');
+                seam.addColorStop(0.45, 'rgba(255, 70, 0, 0.07)');
+                seam.addColorStop(1, 'rgba(255, 60, 0, 0)');
+            } else {
+                seam.addColorStop(0, 'rgba(120, 225, 255, ' + (0.14 + bass * 0.18) + ')');
+                seam.addColorStop(0.45, 'rgba(0, 150, 255, 0.06)');
+                seam.addColorStop(1, 'rgba(0, 200, 255, 0)');
+            }
+            ctx.fillStyle = seam;
+            ctx.fillRect(centerX - glowRadius, height - glowRadius, glowRadius * 2, glowRadius);
+
+            ctx.shadowBlur = 0;
+        }
+
+        function simulateValues(values) {
+            let bassEnergy;
+
+            if (currentMode === 'fire') {
+                const beat = Math.pow(Math.max(0, Math.sin(time * 2.6)), 10);
+                for (let i = 0; i < NUM_BARS; i++) {
+                    const val = 35
+                        + Math.abs(Math.sin(i * 0.32 + time * 2.1)) * 95
+                        + Math.random() * 45
+                        + (i < 12 ? beat * 110 : 0);
+                    values[i] = Math.min(255, val);
+                }
+                bassEnergy = 0.18 + beat * 0.82;
+            } else {
+                for (let i = 0; i < NUM_BARS; i++) {
+                    const val = 30
+                        + (Math.sin(i * 0.13 + time * 0.55) + 1) * 42
+                        + Math.random() * 8;
+                    values[i] = val;
+                }
+                bassEnergy = 0.08 + Math.max(0, Math.sin(time * 0.7)) * 0.12;
+            }
+
+            return bassEnergy;
+        }
+
+        /* =========================================================
+           MAIN LOOP
+           ========================================================= */
+        let time = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const active = spotify.connected && spotify.hasTrack && spotify.playing;
+            time += active ? 0.05 : 0.012;
+
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            let bassEnergy;
+
+            if (active) {
+                bassEnergy = simulateValues(freqValues);
+            } else {
+                for (let i = 0; i < NUM_BARS; i++) {
+                    freqValues[i] = 18 + Math.max(0, Math.sin(i * 0.18 + time * 0.4)) * 14;
+                }
+                bassEnergy = 0.05;
+            }
+
+            if (currentMode === 'fire') {
+                drawVolcano(bassEnergy);
+            } else if (SCENES[currentMode]) {
+                drawScene(bassEnergy);
+            } else {
+                ctx.fillStyle = 'rgba(2, 10, 25, 0.38)';
+                ctx.fillRect(0, 0, width, height);
+            }
+
+            ctx.save();
+            if (currentMode === 'fire' && active && bassEnergy > 0.55) {
+                const shakeX = (Math.random() - 0.5) * 2 * bassEnergy;
+                const shakeY = (Math.random() - 0.5) * 2 * bassEnergy;
+                ctx.translate(shakeX, shakeY);
+            }
+
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].update(active ? bassEnergy : 0.02);
+                particles[i].draw();
+            }
+
+            drawCore(bassEnergy);
+            drawVisualizer(freqValues, bassEnergy);
+            ctx.restore();
+
+            const now = performance.now();
+            if (now - lastUiUpdate > 120) {
+                lastUiUpdate = now;
+                if (spotify.connected && spotify.hasTrack) {
+                    updateProgressUI();
+                    updateLyricsPosition(estimatedPosition(), false);
+                }
+            }
+        }
+
+        /* =========================================================
+           BOOT
+           ========================================================= */
+        initParticles();
+        renderTabs();
+        updateSpotifyUI();
+        pollNow();
+        animate();
+    </script>
+
+    <!-- Modul romaji diambil dari proyek spotify-lyrics-widget (offline, tanpa API). -->
+    <script type="module">
+        import { romanize, detectLanguage } from './romaji.js';
+
+        window.AVRomaji = { romanize, detectLanguage };
+        window.dispatchEvent(new Event('av-romaji-ready'));
+    </script>
+</body>
+</html>
