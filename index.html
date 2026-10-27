@@ -642,6 +642,20 @@
             .status { font-size: 9px; }
         }
 
+        /* =========================================================
+           WALLPAPER (dipakai extension audio-vibe-wallpaper@jbech)
+           ========================================================= */
+        body.is-wallpaper { cursor: none; }
+        body.is-wallpaper .controls,
+        body.is-wallpaper .lyric-meta,
+        body.is-wallpaper .track-row,
+        body.is-wallpaper .icon-btn,
+        body.is-wallpaper .status { display: none; }
+        /* visibility, bukan display: .lyrics-wrapper punya flex:1 yang menahan
+           footer tetap di bawah layar. */
+        body.is-wallpaper.hide-lyrics .lyrics-wrapper { visibility: hidden; }
+        body.is-wallpaper.hide-track .bottom { display: none; }
+
         @media (prefers-reduced-motion: reduce) {
             body.mode-fire .lyric-line.active { animation: none; }
             .lyric-line { transition-duration: 0.01s; }
@@ -787,6 +801,7 @@
 
         let lyrics = null;
         let activeViewId = 'original';
+        let preferredViewId = null;
         let currentLineIndex = -2;
         let lyricSwapTimer = null;
         let lyricSwapToken = 0;
@@ -922,6 +937,29 @@
             updateLyricsPosition(estimatedPosition(), true);
         }
 
+        /*
+         * Mode wallpaper tidak punya tab yang bisa diklik, jadi pilihan bahasa
+         * disimpan sebagai preferensi dan dipasang ulang tiap lirik baru dimuat
+         * (romaji/terjemahan sering baru tersedia belakangan).
+         */
+        function applyPreferredView() {
+            if (!lyrics || !lyrics.views) return;
+            if (preferredViewId && lyrics.views.some((view) => view.id === preferredViewId)) {
+                activeViewId = preferredViewId;
+            }
+            if (!lyrics.views.some((view) => view.id === activeViewId)) {
+                activeViewId = 'original';
+            }
+        }
+
+        function setPreferredView(id) {
+            preferredViewId = id;
+            applyPreferredView();
+            renderTabs();
+            currentLineIndex = -2;
+            if (lyrics) updateLyricsPosition(estimatedPosition(), true);
+        }
+
         function renderLine(animate) {
             const view = activeView();
             if (!view) return;
@@ -994,10 +1032,7 @@
                 views: [],
             };
             lyrics.views = buildViews(lyrics);
-
-            if (!lyrics.views.some((view) => view.id === activeViewId)) {
-                activeViewId = 'original';
-            }
+            applyPreferredView();
 
             renderTabs();
             currentLineIndex = -2;
@@ -1356,11 +1391,8 @@
         window.addEventListener('av-romaji-ready', () => {
             if (!lyrics) return;
 
-            const previous = activeViewId;
             lyrics.views = buildViews(lyrics);
-            if (!lyrics.views.some((view) => view.id === previous)) {
-                activeViewId = 'original';
-            }
+            applyPreferredView();
             renderTabs();
             currentLineIndex = -2;
             renderLine(false);
@@ -1870,6 +1902,7 @@
         let time = 0;
 
         function animate() {
+            if (wallpaperPaused) return;
             requestAnimationFrame(animate);
 
             const active = spotify.connected && spotify.hasTrack && spotify.playing;
@@ -1922,6 +1955,49 @@
                 }
             }
         }
+
+        /* =========================================================
+           WALLPAPER MODE
+           Aktif kalau halaman dibuka dengan ?wallpaper=1 oleh renderer
+           extension audio-vibe-wallpaper@jbech. Kontrol tetap ada di DOM
+           supaya mode browser biasa tidak berubah, hanya disembunyikan.
+           ========================================================= */
+        const wallpaperOptions = new URLSearchParams(location.search);
+        let wallpaperPaused = false;
+
+        function setWallpaperChrome(showLyrics, showTrack) {
+            document.body.classList.toggle('hide-lyrics', !showLyrics);
+            document.body.classList.toggle('hide-track', !showTrack);
+        }
+
+        function setWallpaperPaused(paused) {
+            const resumed = wallpaperPaused && !paused;
+            wallpaperPaused = paused;
+            if (resumed) animate();
+        }
+
+        if (wallpaperOptions.get('wallpaper') === '1') {
+            document.body.classList.add('is-wallpaper');
+            setWallpaperChrome(
+                wallpaperOptions.get('lyrics') !== '0',
+                wallpaperOptions.get('track') !== '0');
+            setMode(wallpaperOptions.get('mode') || currentMode);
+
+            const startView = wallpaperOptions.get('view');
+            if (startView) preferredViewId = startView;
+
+            const startOffset = parseFloat(wallpaperOptions.get('offset') || '');
+            if (Number.isFinite(startOffset)) applyOffset(startOffset);
+        }
+
+        /* Dipanggil renderer extension lewat evaluate_javascript(). */
+        window.audioVibe = {
+            setMode,
+            setChrome: setWallpaperChrome,
+            setPaused: setWallpaperPaused,
+            setView: setPreferredView,
+            setOffset: applyOffset,
+        };
 
         /* =========================================================
            BOOT
