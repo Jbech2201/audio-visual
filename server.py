@@ -222,11 +222,24 @@ def http_json(url: str, timeout: float = 10.0, headers: dict | None = None):
 # --------------------------------------------------------------------------
 
 
+# Error ini berarti Spotify-nya yang tidak ada, bukan bus-nya yang rusak.
+PLAYER_ABSENT_ERRORS = frozenset(
+    {
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+        "org.freedesktop.DBus.Error.UnknownObject",
+        "org.freedesktop.DBus.Error.UnknownInterface",
+        "org.freedesktop.DBus.Error.UnknownMethod",
+        "org.freedesktop.DBus.Error.UnknownProperty",
+    }
+)
+
+
 class SpotifyPlayer:
     """Baca metadata/posisi dari MPRIS dan interpolasi posisi biar mulus."""
 
     def __init__(self) -> None:
-        self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self._bus = None
         self._lock = threading.Lock()
         self._last_position = 0.0
         self._last_at = time.monotonic()
@@ -235,32 +248,85 @@ class SpotifyPlayer:
 
     # -- internal ---------------------------------------------------------
 
-    def _get_all(self) -> dict:
-        reply = self._bus.call_sync(
-            SPOTIFY_BUS,
-            MPRIS_PATH,
-            PROPERTIES_IFACE,
-            "GetAll",
-            GLib.Variant("(s)", [PLAYER_IFACE]),
+    def _connect_bus(self) -> Gio.DBusConnection:
+        """
+        Koneksi privat, bukan Gio.bus_get_sync(), supaya tidak ikut cache
+        global dan bisa dibuang-sambung ulang sendiri.
+        """
+        address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+        bus = Gio.DBusConnection.new_for_address_sync(
+            address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
             None,
-            Gio.DBusCallFlags.NONE,
-            1500,
             None,
         )
+        # Jangan matikan proses kalau bus-nya hilang; kita sambung ulang saja.
+        bus.set_exit_on_close(False)
+        return bus
+
+    def _ensure_bus(self) -> None:
+        """
+        Logout/login bikin dbus-daemon baru, sedangkan koneksi lama tetap
+        "hidup" tapi bicara ke daemon yang sudah mati — gejalanya Spotify
+        selamanya terbaca tidak terdeteksi.
+        """
+        if self._bus is not None:
+            return
+        self._bus = self._connect_bus()
+
+    def _note_failure(self, exc: BaseException) -> None:
+        """
+        Spotify mati itu error yang wajar dan bus-nya tetap sehat, jadi
+        koneksinya dipertahankan. Error lain berarti bus-nya yang bermasalah:
+        buang koneksinya supaya panggilan berikutnya menyambung ulang.
+
+        Tidak memakai is_closed() karena GDBus baru menandai koneksi tertutup
+        belakangan — waktu dbus-daemon diganti, is_closed() masih False.
+        """
+        remote = ""
+        if isinstance(exc, GLib.Error):
+            remote = Gio.DBusError.get_remote_error(exc) or ""
+        if remote in PLAYER_ABSENT_ERRORS:
+            return
+        self._bus = None
+
+    def _get_all(self) -> dict:
+        self._ensure_bus()
+        try:
+            reply = self._bus.call_sync(
+                SPOTIFY_BUS,
+                MPRIS_PATH,
+                PROPERTIES_IFACE,
+                "GetAll",
+                GLib.Variant("(s)", [PLAYER_IFACE]),
+                None,
+                Gio.DBusCallFlags.NONE,
+                1500,
+                None,
+            )
+        except Exception as exc:
+            self._note_failure(exc)
+            raise
         return reply.unpack()[0]
 
     def _call(self, method: str, params=None) -> None:
-        self._bus.call_sync(
-            SPOTIFY_BUS,
-            MPRIS_PATH,
-            PLAYER_IFACE,
-            method,
-            params,
-            None,
-            Gio.DBusCallFlags.NONE,
-            2500,
-            None,
-        )
+        self._ensure_bus()
+        try:
+            self._bus.call_sync(
+                SPOTIFY_BUS,
+                MPRIS_PATH,
+                PLAYER_IFACE,
+                method,
+                params,
+                None,
+                Gio.DBusCallFlags.NONE,
+                2500,
+                None,
+            )
+        except Exception as exc:
+            self._note_failure(exc)
+            raise
 
     def _reset(self) -> None:
         self._last_position = 0.0
